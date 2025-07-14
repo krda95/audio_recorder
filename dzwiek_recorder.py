@@ -10,7 +10,7 @@ import sys
 import re
 
 parser = argparse.ArgumentParser(description="Rejestrator dźwięku z wykresem")
-parser.add_argument('--czas', type=str, required=True, help='Czas nagrania z jednostką: np. 10s, 5m, 2h')
+parser.add_argument('--czas', type=str, help='Czas nagrania z jednostką: np. 10s, 5m, 2h')
 parser.add_argument('--plik', type=str, help='Wczytaj dane z pliku CSV i pokaż wykres')
 args = parser.parse_args()
 
@@ -28,7 +28,6 @@ def parse_duration(value):
     elif jednostka == 'h':
         return liczba * 3600
 
-DURATION_SEC = parse_duration(args.czas)
 
 if args.plik:
     try:
@@ -61,6 +60,7 @@ if args.plik:
         print(f"Błąd podczas wczytywania pliku: {e}")
         sys.exit(1)
 
+DURATION_SEC = parse_duration(args.czas)
 SAMPLERATE = 44100
 CHUNK_SIZE = 1024
 CHANNELS = 1
