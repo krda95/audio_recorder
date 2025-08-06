@@ -36,80 +36,113 @@ def parse_duration(value):
 if args.plik:
     try:
         df = pd.read_csv(args.plik)
-        # Final plotting section, adapted for loaded file
-        start_datetime = datetime.strptime(df['time'].iloc[0], "%H:%M:%S.%f")
-        seconds_from_start = [
-            (datetime.strptime(t, "%H:%M:%S.%f") - start_datetime).total_seconds()
-            for t in df['time']
-        ]
-        x_seconds = seconds_from_start
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        # New-format CSV with exact timestamps
+        if 'time' in df.columns and 'rms' in df.columns and 'dbfs' in df.columns:
+            # Compute seconds from start
+            start_datetime = datetime.strptime(df['time'].iloc[0], "%H:%M:%S.%f")
+            seconds_from_start = [
+                (datetime.strptime(t, "%H:%M:%S.%f") - start_datetime).total_seconds()
+                for t in df['time']
+            ]
+            x_seconds = seconds_from_start
 
-        ax1.plot(x_seconds, df['rms'], label='RMS', color='blue')
-        ax1.set_ylabel("RMS")
-        ax1.set_ylim(0, df['rms'].max() * 1.1 + 1e-6)
-        ax1.grid(True)
-        ax1.legend()
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+            # RMS
+            ax1.plot(x_seconds, df['rms'], label='RMS', color='blue')
+            ax1.set_ylabel("RMS")
+            ax1.set_ylim(0, df['rms'].max() * 1.1 + 1e-6)
+            ax1.grid(True)
+            ax1.legend()
+            # dBFS
+            ax2.plot(x_seconds, df['dbfs'], label='dBFS', color='red')
+            ax2.set_ylabel("dBFS")
+            ax2.set_ylim(-90, 0)
+            ax2.set_xlabel("Czas")
 
-        ax2.plot(x_seconds, df['dbfs'], label='dBFS', color='red')
-        ax2.set_ylabel("dBFS")
-        ax2.set_ylim(-90, 0)
-        ax2.set_xlabel("Czas")
+            # Primary axis ticks every full second
+            max_sec = int(np.floor(seconds_from_start[-1]))
+            primary_locs, primary_labels = [], []
+            for s in range(max_sec + 1):
+                idx = next((i for i, v in enumerate(seconds_from_start) if v >= s), len(seconds_from_start)-1)
+                primary_locs.append(x_seconds[idx])
+                primary_labels.append(df['time'].iloc[idx])
+            ax2.set_xticks(primary_locs)
+            ax2.set_xticklabels(primary_labels, rotation=90)
 
-        # Primary axis: one label per full second
-        max_sec = int(np.floor(seconds_from_start[-1]))
-        primary_locs = []
-        primary_labels = []
-        for s in range(0, max_sec + 1):
-            # find index for this second
-            idx = next((i for i, v in enumerate(seconds_from_start) if v >= s), len(seconds_from_start) - 1)
-            primary_locs.append(x_seconds[idx])
-            primary_labels.append(df['time'].iloc[idx])
-        ax2.set_xticks(primary_locs)
-        ax2.set_xticklabels(primary_labels, rotation=90)
+            # Plot threshold if set
+            ax2.grid(True)
+            ax2.legend()
+            if args.prog is not None:
+                ax2.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
+                ax2.legend()
 
-        ax2.grid(True)
-        ax2.legend()
-        if args.prog is not None:
-            ax2.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
+            # Secondary axis: relative time
+            def format_seconds(x, pos):
+                total = int(round(x))
+                m, s = divmod(total, 60)
+                return f"{m}m {s}s" if m else f"{s}s"
+
+            ax2_sec = ax2.secondary_xaxis('top')
+            ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x, pos)))
+            ax2_sec.set_xlabel("Czas od startu")
+            ax2_sec.set_xticks(list(range(max_sec+1)))
+            for label in ax2_sec.get_xticklabels():
+                label.set_rotation(90)
+
+            # Hover cursor
+            cursor = mplcursors.cursor(hover=True)
+            @cursor.connect("add")
+            def on_add(sel):
+                x, y = sel.target
+                idx = max(0, min(len(df)-1, int(round(x))))
+                sel.annotation.set_text(
+                    f"Rel: {x:.2f}s\nTime: {df['time'].iloc[idx]}\nValue: {y:.2f}"
+                )
+
+            plt.suptitle("Pełny wykres nagrania")
+            plt.tight_layout()
+            plt.show()
+            sys.exit(0)
+
+        # Legacy CSV with timestamp seconds, RMS and dBFS
+        elif 'timestamp' in df.columns and 'rms' in df.columns and 'dbfs' in df.columns:
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+            
+            # RMS vs timestamp (seconds)
+            ax1.plot(df['timestamp'], df['rms'], label='RMS', color='blue')
+            ax1.set_ylabel("RMS")
+            ax1.set_xlabel("Czas (s)")
+            ax1.grid(True)
+            ax1.legend()
+            
+            # dBFS vs timestamp
+            ax2.plot(df['timestamp'], df['dbfs'], label='dBFS', color='red')
+            ax2.set_ylabel("dBFS")
+            ax2.set_xlabel("Czas (s)")
+            ax2.set_ylim(-90, 0)
+            ax2.grid(True)
+            if args.prog is not None:
+                ax2.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
             ax2.legend()
 
-        def format_seconds(x, pos):
-            total_seconds = int(round(x))
-            minutes = total_seconds // 60
-            seconds = total_seconds % 60
-            hours = minutes // 60
-            if hours > 0:
-                return f"{hours}h {minutes}m {seconds}s"
-            if minutes > 0:
-                return f"{minutes}m {seconds}s"
-            else:
-                return f"{seconds}s"
+            cursor = mplcursors.cursor(hover=True)
+            @cursor.connect("add")
+            def on_add(sel):
+                x, y = sel.target
+                idx = max(0, min(len(df)-1, int(round(x))))
+                sel.annotation.set_text(
+                    f"Time: {df['timestamp'].iloc[idx]}\nValue: {y:.2f}"
+                )
+            
+            plt.tight_layout()
+            plt.show()
+            sys.exit(0)
 
-        ax2_sec = ax2.secondary_xaxis('top')
-        ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x, pos)))
-        ax2_sec.set_xlabel("Czas od startu")
-        for label in ax2_sec.get_xticklabels():
-            label.set_rotation(90)
-        ax2_sec.set_xticks(list(range(0, max_sec + 1)))
+        else:
+            print("Nie rozpoznano formatu pliku CSV. Sprawdź nagłówki kolumn.")
+            sys.exit(1)
 
-        plt.suptitle("Pełny wykres nagrania")
-        plt.tight_layout()
-        # Enable interactive hover tooltips showing relative seconds, timestamp, and value
-        cursor = mplcursors.cursor(hover=True)
-        @cursor.connect("add")
-        def on_add(sel):
-            x, y = sel.target
-            # Determine nearest index for timestamp lookup
-            idx = int(round(x))
-            idx = max(0, min(idx, len(df) - 1))
-            timestamp = df['time'].iloc[idx]
-            sel.annotation.set_text(
-                f"Rel: {x:.2f}s\nTime: {timestamp}\nValue: {y:.2f}"
-            )
-        plt.show()
-        sys.exit(0)
     except Exception as e:
         print(f"Błąd podczas wczytywania pliku: {e}")
         sys.exit(1)
