@@ -9,23 +9,26 @@ from pydub import AudioSegment
 import sys
 import re
 import matplotlib.ticker as ticker
-from matplotlib.widgets import SpanSelector
+from matplotlib.widgets import SpanSelector, Button
 import mplcursors
 import numpy as np
+import threading
 
 parser = argparse.ArgumentParser(description="Rejestrator dźwięku z wykresem")
-parser.add_argument('--czas', type=str, help='Czas nagrania z jednostką: np. 10s, 5m, 2h')
+parser.add_argument('--czas', type=str, default='10s', help='Czas nagrania z jednostką: np. 10s, 5m, 2h (domyślnie 10s)')
 parser.add_argument('--plik', type=str, help='Wczytaj dane z pliku CSV i pokaż wykres')
 parser.add_argument('--prog', type=float, default=None, help='Próg dBFS do zapisu (jeśli podany, zapisuje tylko głośne fragmenty)')
 args = parser.parse_args()
 
 
+interrupted = False
+
 def parse_duration(value):
-    match = re.match(r'^(\d+)([smh])$', value)
+    match = re.match(r'^(\d+)([smh]?)$', str(value))
     if not match:
-        print("Błąd: czas musi mieć format np. 10s, 5m, 2h")
+        print("Błąd: czas musi mieć format np. 10s, 5m, 2h lub liczba sekund (np. 10)")
         sys.exit(1)
-    liczba, jednostka = int(match.group(1)), match.group(2)
+    liczba, jednostka = int(match.group(1)), (match.group(2) or 's')
     if jednostka == 's':
         return liczba
     elif jednostka == 'm':
@@ -213,11 +216,11 @@ def audio_callback(indata, frames, time_info, status):
     timestamp_seconds = time.time()
     timestamp_str = datetime.fromtimestamp(timestamp_seconds).strftime("%H:%M:%S.%f")[:-3]  # format HH:MM:SS.mmm
     rel_time = timestamp_seconds - start_time
-    audio_buffer.append(indata.copy()) # mozna filtrowac dodajac do warunku ponizej
+    audio_buffer.append(indata.copy())  # zachowujemy pełny dźwięk do MP3
     if args.prog is None or dbfs >= args.prog:
-        data_list.append((timestamp_str, amplitude, dbfs))
+        data_list.append((timestamp_str, rms, dbfs))
     x_vals.append(rel_time)
-    rms_vals.append(amplitude)
+    rms_vals.append(rms)
     dbfs_vals.append(dbfs)
 
 plt.ion()
@@ -242,13 +245,25 @@ if args.prog is not None:
     ax_dbfs.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
     ax_dbfs.legend()
 
+# --- STOP button in the figure ---
+stop_ax = fig.add_axes([0.86, 0.02, 0.11, 0.06])  # x,y,width,height in figure coords
+stop_btn = Button(stop_ax, 'STOP', hovercolor='tomato')
+
+def _on_stop_clicked(event):
+    global interrupted
+    interrupted = True
+    print('Zatrzymano nagrywanie (przycisk STOP).')
+
+stop_btn.on_clicked(_on_stop_clicked)
+
+
 print(f"Nagrywanie przez {DURATION_SEC} sekund...")
 if args.prog is not None:
     print(f"Tylko fragmenty powyżej progu {args.prog} dBFS będą zapisywane.")
 
 with sd.InputStream(callback=audio_callback, channels=CHANNELS, samplerate=SAMPLERATE, blocksize=CHUNK_SIZE):
     start_time = time.time()
-    while time.time() - start_time < DURATION_SEC:
+    while (not interrupted) and (time.time() - start_time < DURATION_SEC):
         if x_vals:
             timestamp = x_vals[-1]
             line_rms.set_data(x_vals[-500:], rms_vals[-500:])
@@ -256,7 +271,8 @@ with sd.InputStream(callback=audio_callback, channels=CHANNELS, samplerate=SAMPL
             ax_rms.set_xlim(max(0, timestamp - 10), timestamp + 1)
             ax_dbfs.set_xlim(max(0, timestamp - 10), timestamp + 1)
             ax_rms.set_ylim(0, max(rms_vals[-500:]) * 1.1 + 1e-6)
-            ax_dbfs.set_ylim(min(dbfs_vals[-500:]) - 5, 0)
+            bottom = (min(dbfs_vals[-500:]) - 5) if dbfs_vals else -90
+            ax_dbfs.set_ylim(bottom, 0)
             fig.canvas.draw()
             fig.canvas.flush_events()
         time.sleep(0.01)
