@@ -9,6 +9,7 @@ from pydub import AudioSegment
 import sys
 import re
 import matplotlib.ticker as ticker
+from matplotlib.widgets import SpanSelector
 import mplcursors
 import numpy as np
 
@@ -102,6 +103,28 @@ if args.plik:
 
             plt.suptitle("Pełny wykres nagrania")
             plt.tight_layout()
+            # Enable interactive zoom on file-plot
+            def onselect(xmin, xmax):
+                ax1.set_xlim(xmin, xmax)
+                ax2.set_xlim(xmin, xmax)
+                fig.canvas.draw()
+
+            span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
+                                props=dict(alpha=0.3, facecolor='grey'))
+
+            # Save original x-limits for reset
+            orig_xlim1 = ax1.get_xlim()
+            orig_xlim2 = ax2.get_xlim()
+
+            # Reset zoom when pressing 'r'
+            def reset_zoom(event):
+                if event.key == 'r':
+                    ax1.set_xlim(orig_xlim1)
+                    ax2.set_xlim(orig_xlim2)
+                    fig.canvas.draw()
+
+            fig.canvas.mpl_connect('key_press_event', reset_zoom)
+
             plt.show()
             sys.exit(0)
 
@@ -136,6 +159,28 @@ if args.plik:
                 )
             
             plt.tight_layout()
+            # Enable interactive zoom on legacy file-plot
+            def onselect(xmin, xmax):
+                ax1.set_xlim(xmin, xmax)
+                ax2.set_xlim(xmin, xmax)
+                fig.canvas.draw()
+
+            span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
+                                props=dict(alpha=0.3, facecolor='grey'))
+
+            # Save original x-limits for reset
+            orig_xlim1 = ax1.get_xlim()
+            orig_xlim2 = ax2.get_xlim()
+
+            # Reset zoom when pressing 'r'
+            def reset_zoom(event):
+                if event.key == 'r':
+                    ax1.set_xlim(orig_xlim1)
+                    ax2.set_xlim(orig_xlim2)
+                    fig.canvas.draw()
+
+            fig.canvas.mpl_connect('key_press_event', reset_zoom)
+
             plt.show()
             sys.exit(0)
 
@@ -312,4 +357,28 @@ def on_add(sel):
     sel.annotation.set_text(
         f"Rel: {x:.2f}s\nTime: {timestamp}\nValue: {y:.2f}"
     )
+
+# Enable interactive zoom by dragging on the lower subplot
+def onselect(xmin, xmax):
+    # Apply horizontal zoom to both subplots
+    ax1.set_xlim(xmin, xmax)
+    ax2.set_xlim(xmin, xmax)
+    fig.canvas.draw()
+
+span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
+                    props=dict(alpha=0.3, facecolor='grey'))
+
+# Save original x-limits for reset
+orig_xlim1 = ax1.get_xlim()
+orig_xlim2 = ax2.get_xlim()
+
+# Reset zoom when pressing 'r'
+def reset_zoom(event):
+    if event.key == 'r':
+        ax1.set_xlim(orig_xlim1)
+        ax2.set_xlim(orig_xlim2)
+        fig.canvas.draw()
+
+fig.canvas.mpl_connect('key_press_event', reset_zoom)
+
 plt.show()
