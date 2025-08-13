@@ -22,6 +22,7 @@ args = parser.parse_args()
 
 
 interrupted = False
+ignored = False
 
 def parse_duration(value):
     match = re.match(r'^(\d+)([smh]?)$', str(value))
@@ -246,15 +247,23 @@ if args.prog is not None:
     ax_dbfs.legend()
 
 # --- STOP button in the figure ---
-stop_ax = fig.add_axes([0.86, 0.02, 0.11, 0.06])  # x,y,width,height in figure coords
+stop_ax = fig.add_axes([0.86, 0.02, 0.11, 0.06])
 stop_btn = Button(stop_ax, 'STOP', hovercolor='tomato')
+ignore_ax = fig.add_axes([0.86, 0.4, 0.11, 0.06])
+ignore_btn = Button(ignore_ax, 'IGNORE', hovercolor='green')
 
 def _on_stop_clicked(event):
     global interrupted
     interrupted = True
     print('Zatrzymano nagrywanie (przycisk STOP).')
 
+def _on_ignore_clicked(event):
+    global ignored
+    ignored = True
+    print('Zatrzymano nagrywanie (przycisk IGNORE).')
+
 stop_btn.on_clicked(_on_stop_clicked)
+ignore_btn.on_clicked(_on_ignore_clicked)
 
 
 print(f"Nagrywanie przez {DURATION_SEC} sekund...")
@@ -263,7 +272,7 @@ if args.prog is not None:
 
 with sd.InputStream(callback=audio_callback, channels=CHANNELS, samplerate=SAMPLERATE, blocksize=CHUNK_SIZE):
     start_time = time.time()
-    while (not interrupted) and (time.time() - start_time < DURATION_SEC):
+    while (not ignored and not interrupted) and (time.time() - start_time < DURATION_SEC):
         if x_vals:
             timestamp = x_vals[-1]
             line_rms.set_data(x_vals[-500:], rms_vals[-500:])
@@ -279,6 +288,10 @@ with sd.InputStream(callback=audio_callback, channels=CHANNELS, samplerate=SAMPL
 
 plt.ioff()
 plt.close()
+
+if ignored:
+    print("Ignored — nic nie zapisano.")
+    sys.exit(0)
 
 if not data_list:
     print("Brak danych powyżej progu — nic nie zapisano.")
