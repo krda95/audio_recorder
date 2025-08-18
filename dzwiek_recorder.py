@@ -1,3 +1,6 @@
+import os
+import tkinter as tk
+from tkinter import filedialog
 import sounddevice as sd
 import numpy as np
 import pandas as pd
@@ -12,12 +15,11 @@ import matplotlib.ticker as ticker
 from matplotlib.widgets import SpanSelector, Button
 import mplcursors
 import numpy as np
-import threading
 
 parser = argparse.ArgumentParser(description="Rejestrator dźwięku z wykresem")
 parser.add_argument('--czas', type=str, default='10s', help='Czas nagrania z jednostką: np. 10s, 5m, 2h (domyślnie 10s)')
-parser.add_argument('--plik', type=str, help='Wczytaj dane z pliku CSV i pokaż wykres')
 parser.add_argument('--prog', type=float, default=None, help='Próg dBFS do zapisu (jeśli podany, zapisuje tylko głośne fragmenty)')
+parser.add_argument('--plik', action='store_true', help='Otwórz okno wyboru pliku CSV')
 args = parser.parse_args()
 
 
@@ -37,14 +39,44 @@ def parse_duration(value):
     elif jednostka == 'h':
         return liczba * 3600
 
+def pick_csv_via_finder() -> str:
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+    initdir = os.path.join(os.getcwd(), 'baza') if os.path.isdir(os.path.join(os.getcwd(), 'baza')) else os.getcwd()
+    filepath = filedialog.askopenfilename(
+        title='Wybierz plik CSV',
+        initialdir=initdir,
+        filetypes=[('CSV files', '*.csv'), ('All files', '*.*')]
+    )
+    root.destroy()
+    return filepath if filepath else None
+
+def format_seconds(x):
+    total_seconds = int(round(x))
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    hours = minutes // 60
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
+if args.plik:
+    picked = pick_csv_via_finder()
+    if picked:
+        print(f"Wybrano plik: {picked}")
+        args.plik = picked
+    else:
+        print("Nie wybrano pliku – wyłączam program.")
+        sys.exit(-1)
 
 if args.plik:
     try:
         df = pd.read_csv(args.plik)
-
-        # New-format CSV with exact timestamps
         if 'time' in df.columns and 'rms' in df.columns and 'dbfs' in df.columns:
-            # Compute seconds from start
             start_datetime = datetime.strptime(df['time'].iloc[0], "%H:%M:%S.%f")
             seconds_from_start = [
                 (datetime.strptime(t, "%H:%M:%S.%f") - start_datetime).total_seconds()
@@ -65,7 +97,6 @@ if args.plik:
             ax2.set_ylim(-90, 0)
             ax2.set_xlabel("Czas")
 
-            # Primary axis ticks every full second
             max_sec = int(np.floor(seconds_from_start[-1]))
             primary_locs, primary_labels = [], []
             for s in range(max_sec + 1):
@@ -75,27 +106,19 @@ if args.plik:
             ax2.set_xticks(primary_locs)
             ax2.set_xticklabels(primary_labels, rotation=90)
 
-            # Plot threshold if set
             ax2.grid(True)
             ax2.legend()
             if args.prog is not None:
                 ax2.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
                 ax2.legend()
 
-            # Secondary axis: relative time
-            def format_seconds(x, pos):
-                total = int(round(x))
-                m, s = divmod(total, 60)
-                return f"{m}m {s}s" if m else f"{s}s"
-
             ax2_sec = ax2.secondary_xaxis('top')
-            ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x, pos)))
+            ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x)))
             ax2_sec.set_xlabel("Czas od startu")
             ax2_sec.set_xticks(list(range(max_sec+1)))
             for label in ax2_sec.get_xticklabels():
                 label.set_rotation(90)
 
-            # Hover cursor
             cursor = mplcursors.cursor(hover=True)
             @cursor.connect("add")
             def on_add(sel):
@@ -107,7 +130,6 @@ if args.plik:
 
             plt.suptitle("Pełny wykres nagrania")
             plt.tight_layout()
-            # Enable interactive zoom on file-plot
             def onselect(xmin, xmax):
                 ax1.set_xlim(xmin, xmax)
                 ax2.set_xlim(xmin, xmax)
@@ -116,11 +138,9 @@ if args.plik:
             span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
                                 props=dict(alpha=0.3, facecolor='grey'))
 
-            # Save original x-limits for reset
             orig_xlim1 = ax1.get_xlim()
             orig_xlim2 = ax2.get_xlim()
 
-            # Reset zoom when pressing 'r'
             def reset_zoom(event):
                 if event.key == 'r':
                     ax1.set_xlim(orig_xlim1)
@@ -136,14 +156,12 @@ if args.plik:
         elif 'timestamp' in df.columns and 'rms' in df.columns and 'dbfs' in df.columns:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
             
-            # RMS vs timestamp (seconds)
             ax1.plot(df['timestamp'], df['rms'], label='RMS', color='blue')
             ax1.set_ylabel("RMS")
             ax1.set_xlabel("Czas (s)")
             ax1.grid(True)
             ax1.legend()
             
-            # dBFS vs timestamp
             ax2.plot(df['timestamp'], df['dbfs'], label='dBFS', color='red')
             ax2.set_ylabel("dBFS")
             ax2.set_xlabel("Czas (s)")
@@ -163,7 +181,6 @@ if args.plik:
                 )
             
             plt.tight_layout()
-            # Enable interactive zoom on legacy file-plot
             def onselect(xmin, xmax):
                 ax1.set_xlim(xmin, xmax)
                 ax2.set_xlim(xmin, xmax)
@@ -172,11 +189,9 @@ if args.plik:
             span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
                                 props=dict(alpha=0.3, facecolor='grey'))
 
-            # Save original x-limits for reset
             orig_xlim1 = ax1.get_xlim()
             orig_xlim2 = ax2.get_xlim()
 
-            # Reset zoom when pressing 'r'
             def reset_zoom(event):
                 if event.key == 'r':
                     ax1.set_xlim(orig_xlim1)
@@ -215,9 +230,9 @@ def audio_callback(indata, frames, time_info, status):
     rms = np.sqrt(np.mean(indata**2))
     dbfs = 20 * np.log10(rms + 1e-12)
     timestamp_seconds = time.time()
-    timestamp_str = datetime.fromtimestamp(timestamp_seconds).strftime("%H:%M:%S.%f")[:-3]  # format HH:MM:SS.mmm
+    timestamp_str = datetime.fromtimestamp(timestamp_seconds).strftime("%H:%M:%S.%f")[:-3]
     rel_time = timestamp_seconds - start_time
-    audio_buffer.append(indata.copy())  # zachowujemy pełny dźwięk do MP3
+    audio_buffer.append(indata.copy())
     if args.prog is None or dbfs >= args.prog:
         data_list.append((timestamp_str, rms, dbfs))
     x_vals.append(rel_time)
@@ -246,10 +261,9 @@ if args.prog is not None:
     ax_dbfs.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
     ax_dbfs.legend()
 
-# --- STOP button in the figure ---
-stop_ax = fig.add_axes([0.86, 0.02, 0.11, 0.06])
-stop_btn = Button(stop_ax, 'STOP', hovercolor='tomato')
-ignore_ax = fig.add_axes([0.86, 0.4, 0.11, 0.06])
+stop_ax = fig.add_axes([0.8, 0.01, 0.1, 0.05])
+stop_btn = Button(stop_ax, 'STOP & SAVE', hovercolor='tomato')
+ignore_ax = fig.add_axes([0.7, 0.01, 0.07, 0.05])
 ignore_btn = Button(ignore_ax, 'IGNORE', hovercolor='green')
 
 def _on_stop_clicked(event):
@@ -335,12 +349,10 @@ ax2.set_ylim(-90, 0)
 ax2.set_xlabel("Czas")
 
 
-# Primary axis: one label per full second
 max_sec = int(np.floor(seconds_from_start[-1]))
 primary_locs = []
 primary_labels = []
 for s in range(0, max_sec + 1):
-    # find index for this second
     idx = next((i for i, v in enumerate(seconds_from_start) if v >= s), len(seconds_from_start) - 1)
     primary_locs.append(x_seconds[idx])
     primary_labels.append(df['time'].iloc[idx])
@@ -353,20 +365,8 @@ if args.prog is not None:
     ax2.axhline(args.prog, color='green', linestyle='--', label=f'Próg {args.prog} dBFS')
     ax2.legend()
 
-def format_seconds(x, pos):
-    total_seconds = int(round(x))
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    hours = minutes // 60
-    if hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-    if minutes > 0:
-        return f"{minutes}m {seconds}s"
-    else:
-        return f"{seconds}s"
-
 ax2_sec = ax2.secondary_xaxis('top')
-ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x, pos)))
+ax2_sec.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: format_seconds(x)))
 ax2_sec.set_xlabel("Czas od startu")
 for label in ax2_sec.get_xticklabels():
     label.set_rotation(90)
@@ -374,12 +374,10 @@ ax2_sec.set_xticks(list(range(0, max_sec + 1)))
 
 plt.suptitle("Pełny wykres nagrania")
 plt.tight_layout()
-# Enable interactive hover tooltips showing relative seconds, timestamp, and value
 cursor = mplcursors.cursor(hover=True)
 @cursor.connect("add")
 def on_add(sel):
     x, y = sel.target
-    # Determine nearest index for timestamp lookup
     idx = int(round(x))
     idx = max(0, min(idx, len(df) - 1))
     timestamp = df['time'].iloc[idx]
@@ -387,9 +385,7 @@ def on_add(sel):
         f"Rel: {x:.2f}s\nTime: {timestamp}\nValue: {y:.2f}"
     )
 
-# Enable interactive zoom by dragging on the lower subplot
 def onselect(xmin, xmax):
-    # Apply horizontal zoom to both subplots
     ax1.set_xlim(xmin, xmax)
     ax2.set_xlim(xmin, xmax)
     fig.canvas.draw()
@@ -397,11 +393,9 @@ def onselect(xmin, xmax):
 span = SpanSelector(ax2, onselect, 'horizontal', useblit=True,
                     props=dict(alpha=0.3, facecolor='grey'))
 
-# Save original x-limits for reset
 orig_xlim1 = ax1.get_xlim()
 orig_xlim2 = ax2.get_xlim()
 
-# Reset zoom when pressing 'r'
 def reset_zoom(event):
     if event.key == 'r':
         ax1.set_xlim(orig_xlim1)
