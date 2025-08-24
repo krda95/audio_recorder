@@ -1,11 +1,12 @@
 import os
+os.environ["TK_SILENCE_DEPRECATION"] = "1"
 import tkinter as tk
 from tkinter import filedialog
 import sounddevice as sd
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import argparse
 from pydub import AudioSegment
@@ -99,6 +100,9 @@ if args.plik:
 
             max_sec = int(np.floor(seconds_from_start[-1]))
             primary_locs, primary_labels = [], []
+            mask = df['dbfs'] > args.prog
+            hits = df.loc[mask, ['time', 'dbfs']]
+            print(hits.to_string(index=False))
             for s in range(max_sec + 1):
                 idx = next((i for i, v in enumerate(seconds_from_start) if v >= s), len(seconds_from_start)-1)
                 primary_locs.append(x_seconds[idx])
@@ -122,10 +126,10 @@ if args.plik:
             cursor = mplcursors.cursor(hover=True)
             @cursor.connect("add")
             def on_add(sel):
-                x, y = sel.target
-                idx = max(0, min(len(df)-1, int(round(x))))
+                x, y = sel.target  # x is seconds from start
+                abs_ts = format_seconds(x)
                 sel.annotation.set_text(
-                    f"Rel: {x:.2f}s\nTime: {df['time'].iloc[idx]}\nValue: {y:.2f}"
+                    f"Rel: {x:.2f}s\nTime: {abs_ts}\nValue: {y:.2f}"
                 )
 
             plt.suptitle("Pełny wykres nagrania")
@@ -204,7 +208,7 @@ if args.plik:
             sys.exit(0)
 
         else:
-            print("Nie rozpoznano formatu pliku CSV. Sprawdź nagłówki kolumn.")
+            print("Nie rozpoznano formatu pliku CSV. Sprawdź nagłówki kolumn.", df.columns)
             sys.exit(1)
 
     except Exception as e:
@@ -356,8 +360,6 @@ for s in range(0, max_sec + 1):
     idx = next((i for i, v in enumerate(seconds_from_start) if v >= s), len(seconds_from_start) - 1)
     primary_locs.append(x_seconds[idx])
     primary_labels.append(df['time'].iloc[idx])
-ax2.set_xticks(primary_locs)
-ax2.set_xticklabels(primary_labels, rotation=90)
 
 ax2.grid(True)
 ax2.legend()
@@ -378,11 +380,9 @@ cursor = mplcursors.cursor(hover=True)
 @cursor.connect("add")
 def on_add(sel):
     x, y = sel.target
-    idx = int(round(x))
-    idx = max(0, min(idx, len(df) - 1))
-    timestamp = df['time'].iloc[idx]
+    abs_ts = format_seconds(x)
     sel.annotation.set_text(
-        f"Rel: {x:.2f}s\nTime: {timestamp}\nValue: {y:.2f}"
+        f"Rel: {x:.2f}s\nTime: {abs_ts}\nValue: {y:.2f}"
     )
 
 def onselect(xmin, xmax):
